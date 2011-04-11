@@ -46,6 +46,13 @@ public abstract class PerformanceReportParser implements
       AbstractBuild<?, ?> build, Collection<File> reports, TaskListener listener)
       throws IOException;
 
+  /**
+   * Parses the specified report into a {@link PerformanceReport}.
+   */
+  public abstract PerformanceReport parse(
+      AbstractBuild<?, ?> build, File report, TaskListener listener)
+      throws IOException, ParseException;
+
   public abstract String getDefaultGlobPattern();
 
   /**
@@ -57,5 +64,11 @@ public abstract class PerformanceReportParser implements
 
   public String getReportName() {
     return this.getClass().getName().replaceAll("^.*\\.(\\w+)Parser.*$", "$1");
+  }
+
+  public static class ParseException extends Exception {
+    public ParseException(File report, String msg) {
+      super("Performance: Failed to parse " + report + ": " + msg);
+    }
   }
 }

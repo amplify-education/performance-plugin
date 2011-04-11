@@ -201,7 +201,8 @@ public class PerformancePublisher extends Recorder {
 
       // mark the build as unstable or failure depending on the outcome.
       for (PerformanceReport r : parsedReports) {
-        r.setBuildAction(a);
+        r.setBuild(build);
+        r.setErrorStream(logger);
         double errorPercent = r.errorPercent();
         if (errorFailedThreshold > 0 && errorPercent >= errorFailedThreshold) {
           build.setResult(Result.FAILURE);

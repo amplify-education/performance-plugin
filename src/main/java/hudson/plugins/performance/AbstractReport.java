@@ -9,10 +9,10 @@ import java.util.Locale;
 /**
  * Abstract class for classes with size, error, mean, average, 90 line, min and max attributes
  */
-public abstract class AbstractReport {
+public abstract class AbstractReport implements StatsReport {
 
-  private NumberFormat percentFormat;
-  private NumberFormat dataFormat;
+  private transient NumberFormat percentFormat;
+  private transient NumberFormat dataFormat;
 
   abstract public int countErrors();
 

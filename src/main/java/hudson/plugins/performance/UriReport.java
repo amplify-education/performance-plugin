@@ -22,7 +22,7 @@ public class UriReport extends AbstractReport implements ModelObject,
   /**
    * Individual HTTP invocations to this URI and how they went.
    */
-  private final List<HttpSample> httpSampleList = new ArrayList<HttpSample>();
+  private transient final List<HttpSample> httpSampleList = new ArrayList<HttpSample>();
 
   /**
    * The parent object to which this object belongs.
@@ -35,6 +35,8 @@ public class UriReport extends AbstractReport implements ModelObject,
    */
   private final String staplerUri;
 
+  private  AggregateStatistics stats = new AggregateStatistics.Unfrozen();
+
   private String uri;
 
   UriReport(PerformanceReport performanceReport, String staplerUri, String uri) {
@@ -45,6 +47,9 @@ public class UriReport extends AbstractReport implements ModelObject,
 
   public void addHttpSample(HttpSample httpSample) {
     httpSampleList.add(httpSample);
+    AggregateStatistics.Unfrozen ufstats = stats.asUnfrozen();
+    ufstats.sample(httpSample.getDuration(), !httpSample.isSuccessful());
+    stats = ufstats;
   }
 
   public int compareTo(UriReport uriReport) {
@@ -55,75 +60,47 @@ public class UriReport extends AbstractReport implements ModelObject,
   }
 
   public int countErrors() {
-    int nbError = 0;
-    for (HttpSample currentSample : httpSampleList) {
-      if (!currentSample.isSuccessful()) {
-        nbError++;
-      }
-    }
-    return nbError;
+    return stats.getErrorCount();
   }
 
   public double errorPercent() {
-    return ((double) countErrors()) / size() * 100;
+    return stats.getErrorPercent();
   }
 
   public long getAverage() {
-    long average = 0;
-    for (HttpSample currentSample : httpSampleList) {
-      average += currentSample.getDuration();
-    }
-    return average / size();
+    return (long)stats.getAverage();
   }
 
   public long get90Line() {
-    long result = 0;
-    Collections.sort(httpSampleList);
-    if (httpSampleList.size() > 0) {
-      result = httpSampleList.get((int) (httpSampleList.size() * .9)).getDuration();
-    }
-    return result;
+    return stats.get90Line();
   }
 
   public long getMedian() {
-    long result = 0;
-    Collections.sort(httpSampleList);
-    if (httpSampleList.size() > 0) {
-      result = httpSampleList.get((int) (httpSampleList.size() * .5)).getDuration();
-    }
-    return result;
+    return stats.getMedian();
   }
 
-  public AbstractBuild<?, ?> getBuild() {
-    return performanceReport.getBuild();
+  public long getMax() {
+    return stats.getMax();
+  }
+
+  public long getMin() {
+    return stats.getMin();
+  }
+
+  public int size() {
+    return stats.getSize();
   }
 
   public String getDisplayName() {
     return getUri();
   }
 
-  public List<HttpSample> getHttpSampleList() {
-    return httpSampleList;
-  }
-
   public PerformanceReport getPerformanceReport() {
     return performanceReport;
   }
 
-  public long getMax() {
-    long max = Long.MIN_VALUE;
-    for (HttpSample currentSample : httpSampleList) {
-      max = Math.max(max, currentSample.getDuration());
-    }
-    return max;
-  }
-
-  public long getMin() {
-    long min = Long.MAX_VALUE;
-    for (HttpSample currentSample : httpSampleList) {
-      min = Math.min(min, currentSample.getDuration());
-    }
-    return min;
+  public AbstractBuild<?, ?> getBuild() {
+    return performanceReport.getBuild();
   }
 
   public String getStaplerUri() {
@@ -141,9 +118,13 @@ public class UriReport extends AbstractReport implements ModelObject,
   public void setUri(String uri) {
     this.uri = uri;
   }
+ 
+  public List<HttpSample> getHttpSamples() {
+    return Collections.unmodifiableList(httpSampleList);
+  }
 
-  public int size() {
-    return httpSampleList.size();
+  public boolean hasHttpSamples() {
+    return httpSampleList != null && httpSampleList.size() == size();
   }
 
   public String encodeUriReport() throws UnsupportedEncodingException {

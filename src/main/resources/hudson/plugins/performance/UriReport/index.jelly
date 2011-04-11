@@ -18,7 +18,7 @@
         <th>${%URI}</th>
         <th>${%Time}</th>
         <th>${%Duration} (ms)</th>
-        <j:forEach var="c" items="${it.httpSampleList}">
+        <j:forEach var="c" items="${it.getHttpSamples()}">
           <tr class="${h.ifThenElse(c.failed,'red','')}">
             <td class="left">${c.uri}</td>
             <td class="center">${c.date}</td>

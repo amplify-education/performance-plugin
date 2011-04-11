@@ -1,10 +1,13 @@
 package hudson.plugins.performance;
 
 import hudson.model.AbstractBuild;
+import hudson.model.TaskListener;
 
 import org.xml.sax.SAXException;
 
+import java.io.File;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -12,20 +15,41 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+
 /**
  * Represents a single performance report, which consists of multiple {@link UriReport}s for
  * different URLs that was tested.
  *
  * This object belongs under {@link PerformanceReportMap}.
  */
-public class PerformanceReport extends AbstractReport implements
-    Comparable<PerformanceReport> {
+public class PerformanceReport extends AbstractReport
+    implements Comparable<PerformanceReport>, StatsReport {
 
-  private PerformanceBuildAction buildAction;
-
-  private HttpSample httpSample;
+  private PrintStream errorStream;
 
   private String reportFileName = null;
+
+  private AggregateStatistics stats = new AggregateStatistics.Unfrozen();
+
+  /**
+   * {@link AbstractBuild} that this performance report is associated with
+   */
+  private transient AbstractBuild<?, ?> build;
+
+  /**
+   * {@link PerformanceReportParser} that is used to parse this report
+   */
+  private transient PerformanceReportParser parser;
+
+  /**
+   * The source {@link File} for this report
+   */
+  private transient File sourceFile;
+
+  /**
+   * The {@link TaskListener} for the task where this report was loaded
+   */
+  private transient TaskListener listener;
 
   /**
    * {@link UriReport}s keyed by their {@link UriReport#getStaplerUri()}.
@@ -35,7 +59,7 @@ public class PerformanceReport extends AbstractReport implements
   public void addSample(HttpSample pHttpSample) throws SAXException {
     String uri = pHttpSample.getUri();
     if (uri == null) {
-      buildAction.getHudsonConsoleWriter().println(
+      getErrorStream().println(
           "label cannot be empty, please ensure your jmx file specifies name properly for each http sample: skipping sample");
       return;
     }
@@ -46,6 +70,9 @@ public class PerformanceReport extends AbstractReport implements
       uriReportMap.put(staplerUri, uriReport);
     }
     uriReport.addHttpSample(pHttpSample);
+    AggregateStatistics.Unfrozen ufstats = stats.asUnfrozen();
+    ufstats.sample(pHttpSample.getDuration(), !pHttpSample.isSuccessful());
+    stats = ufstats;
   }
 
   public int compareTo(PerformanceReport jmReport) {
@@ -56,67 +83,35 @@ public class PerformanceReport extends AbstractReport implements
   }
 
   public int countErrors() {
-    int nbError = 0;
-    for (UriReport currentReport : uriReportMap.values()) {
-      nbError += currentReport.countErrors();
-    }
-    return nbError;
+    return stats.getErrorCount();
   }
 
   public double errorPercent() {
-    return size() == 0 ? 0 : ((double) countErrors()) / size() * 100;
+    return stats.getErrorPercent();
   }
 
   public long getAverage() {
-    long result = 0;
-    int size = size();
-    if (size != 0) {
-      long average = 0;
-      for (UriReport currentReport : uriReportMap.values()) {
-        average += currentReport.getAverage() * currentReport.size();
-      }
-      double test = average / size;
-      result = (int) test;
-    }
-    return result;
+    return (long)stats.getAverage();
   }
 
   public long get90Line() {
-    long result = 0;
-    int size = size();
-    if (size != 0) {
-      long average = 0;
-      List<HttpSample> allSamples = new ArrayList<HttpSample>();
-      for (UriReport currentReport : uriReportMap.values()) {
-        allSamples.addAll(currentReport.getHttpSampleList());
-      }
-      Collections.sort(allSamples);
-      result = allSamples.get((int) (allSamples.size() * .9)).getDuration();
-    }
-    return result;
+    return stats.get90Line();
   }
 
   public long getMedian() {
-    long result = 0;
-    int size = size();
-    if (size != 0) {
-      long average = 0;
-      List<HttpSample> allSamples = new ArrayList<HttpSample>();
-      for (UriReport currentReport : uriReportMap.values()) {
-        allSamples.addAll(currentReport.getHttpSampleList());
-      }
-      Collections.sort(allSamples);
-      result = allSamples.get((int) (allSamples.size() * .5)).getDuration();
-    }
-    return result;
+    return stats.getMedian();
   }
 
-  public AbstractBuild<?, ?> getBuild() {
-    return buildAction.getBuild();
+  public long getMax() {
+    return stats.getMax();
   }
 
-  PerformanceBuildAction getBuildAction() {
-    return buildAction;
+  public long getMin() {
+    return stats.getMin();
+  }
+
+  public int size() {
+    return stats.getSize();
   }
 
   public String getDisplayName() {
@@ -124,35 +119,55 @@ public class PerformanceReport extends AbstractReport implements
   }
 
   public UriReport getDynamic(String token) throws IOException {
-    return getUriReportMap().get(token);
-  }
-
-  public HttpSample getHttpSample() {
-    return httpSample;
-  }
-
-  public long getMax() {
-    long max = Long.MIN_VALUE;
-    for (UriReport currentReport : uriReportMap.values()) {
-      max = Math.max(currentReport.getMax(), max);
-    }
-    return max;
-  }
-
-  public long getMin() {
-    long min = Long.MAX_VALUE;
-    for (UriReport currentReport : uriReportMap.values()) {
-      min = Math.min(currentReport.getMin(), min);
-    }
-    return min;
+    return uriReportMap.get(token);
   }
 
   public String getReportFileName() {
     return reportFileName;
   }
 
+  public AbstractBuild<?, ?> getBuild() {
+    return build;
+  }
+
+  public void setBuild(AbstractBuild<?, ?> build) {
+    this.build = build;
+  }
+
+  public void setParser(PerformanceReportParser parser) {
+    this.parser = parser;
+  }
+
+  public PerformanceReportParser getParser() {
+    return parser;
+  }
+
+  public void setSourceFile(File source) {
+    this.sourceFile = source;
+  }
+
+  public File getSourceFile() {
+    return sourceFile;
+  }
+
+  public void setListener(TaskListener listener) {
+    this.listener = listener;
+  }
+
+  public TaskListener getListener() {
+    return listener;
+  }
+
+  public PrintStream getErrorStream() {
+    return errorStream;
+  }
+
+  public void setErrorStream(PrintStream stream) {
+    errorStream = stream;
+  }
+
   public List<UriReport> getUriListOrdered() {
-    Collection<UriReport> uriCollection = getUriReportMap().values();
+    Collection<UriReport> uriCollection = uriReportMap.values();
     List<UriReport> UriReportList = new ArrayList<UriReport>(uriCollection);
     return UriReportList;
   }
@@ -161,23 +176,7 @@ public class PerformanceReport extends AbstractReport implements
     return uriReportMap;
   }
 
-  void setBuildAction(PerformanceBuildAction buildAction) {
-    this.buildAction = buildAction;
-  }
-
-  public void setHttpSample(HttpSample httpSample) {
-    this.httpSample = httpSample;
-  }
-
   public void setReportFileName(String reportFileName) {
     this.reportFileName = reportFileName;
-  }
-
-  public int size() {
-    int size = 0;
-    for (UriReport currentReport : uriReportMap.values()) {
-      size += currentReport.size();
-    }
-    return size;
   }
 }

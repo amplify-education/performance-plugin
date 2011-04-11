@@ -66,7 +66,7 @@ public class PerformanceBuildAction implements Action, StaplerProxy {
     return hudsonConsoleWriter;
   }
 
-  public PerformanceReportMap getPerformanceReportMap() {
+  public synchronized PerformanceReportMap getPerformanceReportMap() {
     PerformanceReportMap reportMap = null;
     WeakReference<PerformanceReportMap> wr = this.performanceReportMap;
     if (wr != null) {
@@ -79,6 +79,8 @@ public class PerformanceBuildAction implements Action, StaplerProxy {
       reportMap = new PerformanceReportMap(this, new StreamTaskListener(
           System.err));
     } catch (IOException e) {
+      logger.log(Level.SEVERE, "Error creating new PerformanceReportMap()", e);
+    } catch (InterruptedException e) {
       logger.log(Level.SEVERE, "Error creating new PerformanceReportMap()", e);
     }
     this.performanceReportMap = new WeakReference<PerformanceReportMap>(

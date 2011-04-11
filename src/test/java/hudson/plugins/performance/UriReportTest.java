@@ -12,51 +12,50 @@ import org.junit.Test;
 
 public class UriReportTest {
 
-	private static final long AVERAGE = 5;
-	private static final long MIN = 0;
-	private static final long MAX = 10;
 	private UriReport uriReport;
 
 	@Before
 	public void setUp() {
 		uriReport = new UriReport(null, null, null);
-		HttpSample httpSample1 = new HttpSample();
-		httpSample1.setDuration(MAX);
 		Date date = new Date();
-		httpSample1.setDate(date);
-		httpSample1.setSuccessful(false);
-		HttpSample httpSample2 = new HttpSample();
-		httpSample2.setDuration(AVERAGE);
-		httpSample2.setDate(date);
-		httpSample2.setSuccessful(true);
-		HttpSample httpSample3 = new HttpSample();
-		httpSample3.setDuration(MIN);
-		httpSample3.setDate(date);
-		httpSample3.setSuccessful(false);
-		uriReport.addHttpSample(httpSample1);
-		uriReport.addHttpSample(httpSample2);
-		uriReport.addHttpSample(httpSample3);
+		for (int i = 0; i < 11; i++) {
+			HttpSample httpSample = new HttpSample();
+			httpSample.setDuration(i);
+			httpSample.setDate(date);
+			httpSample.setSuccessful(i%2 == 0);
+			uriReport.addHttpSample(httpSample);
+		}
 	}
 
 	@Test
 	public void testCountErrors() {
-		assertEquals(2, uriReport.countErrors());
+		assertEquals(5, uriReport.countErrors());
 	}
 
 	@Test
 	public void testGetAverage() {
-		assertEquals(AVERAGE, uriReport.getAverage());
+		assertEquals(5, uriReport.getAverage());
 	}
 
-//	@Test
-//	public void testGetMax() {
-//		assertEquals(MAX, uriReport.getMax());
-//	}
+	@Test
+	public void testGetMax() {
+		assertEquals(10, uriReport.getMax());
+	}
 
-//	@Test
-//	public void testGetMin() {
-//		assertEquals(MIN, uriReport.getMin());
-//	}
+	@Test
+	public void testGetMin() {
+		assertEquals(0, uriReport.getMin());
+	}
+
+	@Test
+	public void testGetMedian() {
+		assertEquals(5, uriReport.getMedian());
+	}
+
+	@Test
+	public void testGet90Line() {
+		assertEquals(9, uriReport.get90Line());
+	}
 
 	@Test
 	public void testIsFailed() {

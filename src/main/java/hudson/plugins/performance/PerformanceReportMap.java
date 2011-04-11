@@ -1,13 +1,22 @@
 package hudson.plugins.performance;
 
+import hudson.FilePath;
+
 import hudson.model.AbstractBuild;
+import hudson.model.Hudson;
 import hudson.model.ModelObject;
+import hudson.model.TaskListener;
 
 import java.io.File;
 import java.io.FileFilter;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+
 import java.net.URLDecoder;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -17,13 +26,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.StringTokenizer;
 
-import hudson.model.TaskListener;
-import org.apache.log4j.Logger;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Root object of a performance report.
  */
 public class PerformanceReportMap implements ModelObject {
+
+  private static final Logger LOGGER = Logger.getLogger(PerformanceReportMap.class.getName());
+
   /**
    * The {@link PerformanceBuildAction} that this report belongs to.
    */
@@ -37,6 +49,7 @@ public class PerformanceReportMap implements ModelObject {
   private Map<String, PerformanceReport> performanceReportMap = new LinkedHashMap<String, PerformanceReport>();
 
   private static final String PERFORMANCE_REPORTS_DIRECTORY = "performance-reports";
+  private static final String PERFORMANCE_SUMMARIES_DIRECTORY = "performance-summaries";
 
   /**
    * Parses the reports and build a {@link PerformanceReportMap}.
@@ -45,7 +58,7 @@ public class PerformanceReportMap implements ModelObject {
    *      If a report fails to parse.
    */
   PerformanceReportMap(PerformanceBuildAction buildAction, TaskListener listener)
-      throws IOException {
+      throws IOException, InterruptedException {
     this.buildAction = buildAction;
 
     File repo = new File(getBuild().getRootDir(),
@@ -59,8 +72,7 @@ public class PerformanceReportMap implements ModelObject {
     });
     // this may fail, if the build itself failed, we need to recover gracefully
     if (files != null) {
-      addAll(new JMeterParser("").parse(buildAction.getBuild(),
-          Arrays.asList(files), listener));
+      loadAll(Arrays.asList(files), new JMeterParser(""), listener);
     }
 
     // otherwise subdirectory name designates the parser ID.
@@ -74,17 +86,44 @@ public class PerformanceReportMap implements ModelObject {
       for (File dir : dirs) {
         PerformanceReportParser p = buildAction.getParserById(dir.getName());
         if (p != null) {
-          addAll(p.parse(getBuild(), Arrays.asList(dir.listFiles()), listener));
+          loadAll(Arrays.asList(dir.listFiles()), p, listener);
         }
       }
     }
   }
 
-  private void addAll(Collection<PerformanceReport> reports) {
-    for (PerformanceReport r : reports) {
-      r.setBuildAction(buildAction);
-      performanceReportMap.put(r.getReportFileName(), r);
+  private void loadAll(Collection<File> files, PerformanceReportParser parser, TaskListener listener)
+      throws IOException, InterruptedException {
+    for (File f: files) {
+      try {
+        PerformanceReport report = loadPerformanceReport(f, parser, listener);
+        performanceReportMap.put(report.getReportFileName(), report);
+      } catch (PerformanceReportParser.ParseException exc) {
+        // Don't add a report that won't parse to the results
+      }
     }
+  }
+
+  private PerformanceReport loadPerformanceReport(File reportFile, PerformanceReportParser parser, TaskListener listener)
+      throws IOException, PerformanceReportParser.ParseException, InterruptedException {
+    final Hudson app = Hudson.getInstance();
+    FilePath summaryReport = new FilePath(new File(reportFile.toString().replaceFirst(
+      getPerformanceReportDirRelativePath(),
+      getPerformanceSummaryDirRelativePath()
+    )));
+    Hudson.XSTREAM.registerConverter(new AggregateStatistics.Unfrozen.UnfrozenConverter());
+    PerformanceReport report = null;
+    try {
+      report = (PerformanceReport)Hudson.XSTREAM.fromXML(summaryReport.read());
+    } catch (FileNotFoundException exc) {
+      report = parser.parse(getBuild(), reportFile, listener);
+      Hudson.XSTREAM.toXML(report, summaryReport.write());
+    }
+    report.setBuild(getBuild());
+    report.setParser(parser);
+    report.setSourceFile(reportFile);
+    report.setListener(listener);
+    return report;
   }
 
   public AbstractBuild<?, ?> getBuild() {
@@ -123,7 +162,7 @@ public class PerformanceReportMap implements ModelObject {
   }
 
   /**
-   * Get a URI report within a Performance report file
+   * Get a URI report within a Performance report file (using a full parse)
    * 
    * @param uriReport
    *            "Performance report file name";"URI name"
@@ -141,8 +180,30 @@ public class PerformanceReportMap implements ModelObject {
       }
       StringTokenizer st = new StringTokenizer(uriReportDecoded,
           GraphConfigurationDetail.SEPARATOR);
-      return getPerformanceReportMap().get(st.nextToken()).getUriReportMap().get(
-          st.nextToken());
+      String filename = st.nextToken();
+      String uri = st.nextToken();
+      Map<String, PerformanceReport> reportMap = getPerformanceReportMap();
+      PerformanceReport perfReport = reportMap.get(filename);
+      UriReport uriPerfReport = perfReport.getUriReportMap().get(uri);
+      if (uriPerfReport.hasHttpSamples()) {
+        return uriPerfReport;
+      } else {
+        try {
+          PerformanceReport parsed = perfReport.getParser().parse(
+            perfReport.getBuild(),
+            perfReport.getSourceFile(),
+            perfReport.getListener()
+          );
+          reportMap.put(parsed.getReportFileName(), parsed);
+          return parsed.getUriReportMap().get(uri);
+        } catch (IOException exc) {
+          LOGGER.log(Level.SEVERE, "Unable to re-parse for uri report " + uriReport, exc);
+          return uriPerfReport;
+        } catch (PerformanceReportParser.ParseException exc) {
+          LOGGER.log(Level.SEVERE, "Unable to re-parse for uri report " + uriReport, exc);
+          return uriPerfReport;
+        }
+      }
     } else {
       return null;
     }
@@ -163,16 +224,20 @@ public class PerformanceReportMap implements ModelObject {
 
   public static String getPerformanceReportFileRelativePath(
       String reportFileName) {
-    return getRelativePath(reportFileName);
+    return getRelativePath(PERFORMANCE_REPORTS_DIRECTORY, reportFileName);
   }
 
   public static String getPerformanceReportDirRelativePath() {
-    return getRelativePath(null);
+    return getRelativePath(PERFORMANCE_REPORTS_DIRECTORY, null);
   }
 
-  private static String getRelativePath(String reportFileName) {
+  public static String getPerformanceSummaryDirRelativePath() {
+    return getRelativePath(PERFORMANCE_SUMMARIES_DIRECTORY, null);
+  }
+
+  private static String getRelativePath(String dirname, String reportFileName) {
     StringBuilder sb = new StringBuilder(100);
-    sb.append(PERFORMANCE_REPORTS_DIRECTORY);
+    sb.append(dirname);
     if (reportFileName != null) {
       sb.append("/").append(reportFileName);
     }

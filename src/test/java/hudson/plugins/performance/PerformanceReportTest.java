@@ -25,24 +25,17 @@ public class PerformanceReportTest {
 
 	@Before
 	public void setUp() throws Exception {
-		PerformanceBuildAction buildAction = EasyMock
-				.createMock(PerformanceBuildAction.class);
+		PrintStream printStream = EasyMock.createMock(PrintStream.class);
 		performanceReport = new PerformanceReport();
-		performanceReport.setBuildAction(buildAction);
+		performanceReport.setErrorStream(printStream);
 	}
 
 	@Test
 	public void testAddSample() throws Exception {
-		PrintStream printStream = EasyMock.createMock(PrintStream.class);
-		EasyMock.expect(
-				performanceReport.getBuildAction().getHudsonConsoleWriter())
-				.andReturn(printStream);
-		printStream
-				.println("label cannot be empty, please ensure your jmx file specifies name properly for each http sample: skipping sample");
-		EasyMock.replay(printStream);
-		EasyMock.replay(performanceReport.getBuildAction());
 
 		HttpSample sample1 = new HttpSample();
+		long duration = 23;
+		sample1.setDuration(duration);
 		performanceReport.addSample(sample1);
 
 		sample1.setUri("invalidCharacter/");
@@ -54,13 +47,16 @@ public class PerformanceReportTest {
 		String uri = "uri";
 		sample1.setUri(uri);
 		performanceReport.addSample(sample1);
-		Map<String, UriReport> uriReportMap = performanceReport
+		Map<String, ? extends UriReport> uriReportMap = performanceReport
 				.getUriReportMap();
 		uriReport = uriReportMap.get(uri);
 		assertNotNull(uriReport);
-		List<HttpSample> httpSampleList = uriReport.getHttpSampleList();
-		assertEquals(1, httpSampleList.size());
-		assertEquals(sample1, httpSampleList.get(0));
+		assertEquals(1, uriReport.size());
+		assertEquals(2, performanceReport.size());
+		assertEquals(duration, uriReport.getMax());
+		assertEquals(duration, uriReport.getMax());
+		assertEquals(duration, performanceReport.getMin());
+		assertEquals(duration, performanceReport.getMin());
 	}
 
 	@Test
@@ -86,19 +82,14 @@ public class PerformanceReportTest {
 		assertEquals(2, uriReportMap.size());
 		String loginUri = "Home";
 		UriReport firstUriReport = uriReportMap.get(loginUri);
-		HttpSample firstHttpSample = firstUriReport.getHttpSampleList().get(0);
-		assertEquals(loginUri, firstHttpSample.getUri());
-		assertEquals(14720, firstHttpSample.getDuration());
-		assertEquals(new Date(1296846793179L), firstHttpSample.getDate());
-		assertTrue(firstHttpSample.isSuccessful());
+		assertEquals(501, firstUriReport.getMin());
+		assertEquals(15902, firstUriReport.getMax());
+		assertEquals(0, firstUriReport.countErrors());
 		String logoutUri = "Workgroup";
 		UriReport secondUriReport = uriReportMap.get(logoutUri);
-		HttpSample secondHttpSample = secondUriReport.getHttpSampleList()
-				.get(0);
-		assertEquals(logoutUri, secondHttpSample.getUri());
-		assertEquals(278, secondHttpSample.getDuration());
-		assertEquals(new Date(1296846847952L), secondHttpSample.getDate());
-		assertTrue(secondHttpSample.isSuccessful());
+		assertEquals(58, secondUriReport.getMin());
+		assertEquals(1017, secondUriReport.getMax());
+		assertEquals(0, secondUriReport.countErrors());
 	}
 
 	private PerformanceReport parseOneJMeter(File f) throws IOException {
@@ -125,11 +116,9 @@ public class PerformanceReportTest {
 		UriReport report = uriReportMap.get(uri);
 		assertNotNull(report);
 
-		int[] expectedDurations = {894, 1508, 1384, 1581, 996};
-		for (int i = 0; i < expectedDurations.length; i++) {
-			HttpSample sample = report.getHttpSampleList().get(i);
-			assertEquals(expectedDurations[i], sample.getDuration());
-		}
+		assertEquals(894, report.getMin());
+		assertEquals(1581, report.getMax());
+		assertEquals(1272, report.getAverage());
 	}
 
 	@Test
@@ -141,23 +130,18 @@ public class PerformanceReportTest {
 		assertEquals(5, uriReportMap.size());
 		String firstUri = "testGetMin";
 		UriReport firstUriReport = uriReportMap.get(firstUri);
-		HttpSample firstHttpSample = firstUriReport.getHttpSampleList().get(0);
-		assertEquals(firstUri, firstHttpSample.getUri());
-		assertEquals(31, firstHttpSample.getDuration());
-		assertEquals(new Date(0L), firstHttpSample.getDate());
-		assertTrue(firstHttpSample.isSuccessful());
+		assertEquals(31, firstUriReport.getMax());
+		assertEquals(31, firstUriReport.getMin());
+		assertEquals(0, firstUriReport.countErrors());
 		String lastUri = "testGetMax";
 		UriReport secondUriReport = uriReportMap.get(lastUri);
-		HttpSample secondHttpSample = secondUriReport.getHttpSampleList()
-				.get(0);
-		assertEquals(lastUri, secondHttpSample.getUri());
-		assertEquals(26, secondHttpSample.getDuration());
-		assertEquals(new Date(0L), secondHttpSample.getDate());
-		assertFalse(secondHttpSample.isSuccessful());
+		assertEquals(26, secondUriReport.getMax());
+		assertEquals(26, secondUriReport.getMin());
+		assertEquals(1, secondUriReport.countErrors());
 	}
-        
+		
 
-        @Test
+		@Test
 	public void testPerformanceReportMultiLevel() throws IOException, SAXException {
 		PerformanceReport performanceReport = parseOneJMeter(new File(
 				"src/test/resources/JMeterResultsMultiLevel.jtl"));
